@@ -58,6 +58,81 @@ class CommandsCog(commands.Cog):
     def __init__(self, bot: RustalkerBot) -> None:
         self.bot = bot
 
+    @app_commands.command(name="tuto", description="Muestra una guía rápida de uso de los comandos")
+    async def tuto(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="📘 GUÍA RÁPIDA DE RUSTALKER",
+            description="Estos son los comandos principales y cómo usarlos.",
+            color=discord.Color.blurple(),
+            timestamp=discord.utils.utcnow()
+        )
+
+        embed.add_field(
+            name="🔧 Configuración inicial",
+            value=(
+                "`/setup_alerts channel [role_mention]`\n"
+                "Define el canal donde llegarán las alertas.\n\n"
+                "`/setup_rules spike_window spike_threshold queue_threshold`\n"
+                "Ajusta los umbrales de alertas tácticas."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🎯 Watchlist y servidores",
+            value=(
+                "`/watch target [notes] [custom_channel]`\n"
+                "Añade un jugador a vigilancia. Usa `target` como ID o URL de BattleMetrics.\n\n"
+                "`/unwatch player_id`\n"
+                "Quita un jugador de la watchlist.\n\n"
+                "`/watchlist`\n"
+                "Muestra todos los jugadores vigilados.\n\n"
+                "`/server_track target`\n"
+                "Empieza a monitorear un servidor de BattleMetrics.\n\n"
+                "`/server_untrack server_id`\n"
+                "Detiene el monitoreo de un servidor."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🏴 Clanes",
+            value=(
+                "`/clan create name`\n"
+                "Crea un clan en este servidor.\n\n"
+                "`/clan list`\n"
+                "Lista los clanes guardados.\n\n"
+                "`/clan add_member clan_name player_target`\n"
+                "Añade un jugador a un clan.\n\n"
+                "`/clan remove_member clan_name player_target`\n"
+                "Elimina un miembro del clan."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📈 Análisis",
+            value=(
+                "`/stats target [dias]`\n"
+                "Genera un gráfico con la actividad de un jugador.\n\n"
+                "`/raid_predictor [target_player] [clan_name]`\n"
+                "Calcula la mejor ventana de inactividad para un jugador o un clan."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="💡 Tips",
+            value=(
+                "- Usa IDs o URLs de BattleMetrics cuando el comando lo pida.\n"
+                "- `custom_channel` es opcional, pero útil si quieres alertas separadas.\n"
+                "- La mayoría de comandos solo funcionan dentro de servidores."
+            ),
+            inline=False
+        )
+
+        await interaction.response.send_message(embed=embed)
+
     # --- CLAN SUBCOMMAND GROUP ---
     clan_group = app_commands.Group(name="clan", description="Gestión de clanes enemigos y alianzas")
 

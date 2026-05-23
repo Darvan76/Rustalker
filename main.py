@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -72,16 +73,31 @@ class RustalkerBot(commands.Bot):
 
 
 def main() -> None:
-    # Load env variables from .env if present
-    load_dotenv()
+    # Load env variables from a .env file next to this script.
+    env_path = Path(__file__).resolve().with_name(".env")
+    load_dotenv(dotenv_path=env_path)
 
     token = os.getenv("DISCORD_BOT_TOKEN")
-    if not token:
-        logger.critical("Error: DISCORD_BOT_TOKEN is missing in the environment. Please configure it in .env file.")
-        sys.exit(1)
-
     bm_token = os.getenv("BATTLEMETRICS_TOKEN")
     db_path = os.getenv("DATABASE_PATH", "rustalker.db")
+
+    missing_vars = [name for name, value in (
+        ("DISCORD_BOT_TOKEN", token),
+    ) if not value]
+
+    if missing_vars:
+        if not env_path.exists():
+            logger.critical(
+                "Error: no se encontró el archivo .env en %s. Copia .env.example a .env y completa los valores requeridos.",
+                env_path,
+            )
+        logger.critical(
+            "Faltan variables de entorno obligatorias: %s",
+            ", ".join(missing_vars),
+        )
+        if bm_token is None:
+            logger.info("BATTLEMETRICS_TOKEN no está configurado. El bot arrancará con funcionalidad limitada.")
+        sys.exit(1)
 
     bot = RustalkerBot(db_path=db_path, bm_token=bm_token)
 

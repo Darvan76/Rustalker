@@ -231,6 +231,25 @@ class Database:
             (player_id,),
         )
 
+    async def get_watch_player(self, guild_id: int, player_id: int) -> aiosqlite.Row | None:
+        return await self.fetchone(
+            """
+            SELECT
+                w.guild_id,
+                w.battlemetrics_player_id,
+                w.notify_channel_id,
+                w.added_by,
+                w.notes,
+                w.created_at,
+                p.current_name,
+                p.steam_id
+            FROM watchlist w
+            JOIN players p ON p.battlemetrics_player_id = w.battlemetrics_player_id
+            WHERE w.guild_id = ? AND w.battlemetrics_player_id = ?
+            """,
+            (guild_id, player_id),
+        )
+
     async def add_watch_player(
         self,
         guild_id: int,
@@ -630,6 +649,60 @@ class Database:
                 cursor = segment_end
 
         return buckets
+
+    async def get_player_session_summary(self, guild_id: int, player_id: int) -> aiosqlite.Row | None:
+        return await self.fetchone(
+            """
+            SELECT
+                COUNT(*) AS session_count,
+                COALESCE(SUM(COALESCE(duration_seconds, 0)), 0) AS total_seconds,
+                MAX(started_at) AS last_started_at,
+                MAX(ended_at) AS last_ended_at,
+                MIN(started_at) AS first_started_at
+            FROM sessions
+            WHERE guild_id = ? AND battlemetrics_player_id = ?
+            """,
+            (guild_id, player_id),
+        )
+
+    async def get_recent_player_sessions(self, guild_id: int, player_id: int, limit: int = 5) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT
+                s.started_at,
+                s.ended_at,
+                s.duration_seconds,
+                s.battlemetrics_server_id,
+                COALESCE(ts.name, 'Servidor ' || s.battlemetrics_server_id) AS server_name
+            FROM sessions s
+            LEFT JOIN tracked_servers ts
+                ON ts.guild_id = s.guild_id
+               AND ts.battlemetrics_server_id = s.battlemetrics_server_id
+            WHERE s.guild_id = ? AND s.battlemetrics_player_id = ?
+            ORDER BY s.started_at DESC
+            LIMIT ?
+            """,
+            (guild_id, player_id, limit),
+        )
+
+    async def get_latest_presence_snapshot(self, guild_id: int, player_id: int) -> aiosqlite.Row | None:
+        return await self.fetchone(
+            """
+            SELECT
+                ps.*,
+                COALESCE(ts.name, 'Servidor ' || ps.battlemetrics_server_id) AS server_name,
+                ts.last_ip,
+                ts.last_port
+            FROM presence_snapshots ps
+            LEFT JOIN tracked_servers ts
+                ON ts.guild_id = ps.guild_id
+               AND ts.battlemetrics_server_id = ps.battlemetrics_server_id
+            WHERE ps.guild_id = ? AND ps.battlemetrics_player_id = ?
+            ORDER BY ps.updated_at DESC
+            LIMIT 1
+            """,
+            (guild_id, player_id),
+        )
 
     async def get_clan_member_ids(self, guild_id: int, clan_id: int) -> set[int]:
         rows = await self.fetchall(

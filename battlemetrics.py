@@ -63,7 +63,40 @@ class BattleMetricsClient:
             "id": int(data.get("id", player_id)),
             "name": str(name),
             "steam_id": steam_id,
+            "attributes": attributes,
+            "included": included,
+            "raw": payload,
         }
+
+    async def search_players(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        payload = await self._get(
+            "/players",
+            params={
+                "filter[search]": query,
+                "include": "identifier",
+                "page[size]": str(limit),
+            },
+        )
+
+        results: list[dict[str, Any]] = []
+        for item in payload.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            attrs = item.get("attributes") or {}
+            try:
+                pid = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            results.append(
+                {
+                    "id": pid,
+                    "name": str(attrs.get("name") or f"Player {pid}"),
+                    "attributes": attrs,
+                    "raw": item,
+                }
+            )
+
+        return results
 
     async def get_server(self, server_id: int, include_players: bool = True) -> dict[str, Any]:
         params = {"include": "player"} if include_players else None

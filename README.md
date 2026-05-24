@@ -190,7 +190,3 @@ Ejemplo:
 - La sincronización global de slash commands puede tardar un poco en reflejarse.
 - Si el bot no responde, revisa el token de Discord y el acceso de red a BattleMetrics.
 - El archivo de base de datos se puede borrar si quieres empezar desde cero.
-
-## Licencia
-
-Este proyecto no incluye licencia todavía. Si quieres, puedes añadir una según tu preferencia.

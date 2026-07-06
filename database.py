@@ -38,6 +38,12 @@ class Database:
                 clan_spike_window_minutes INTEGER NOT NULL DEFAULT 15,
                 clan_spike_threshold INTEGER NOT NULL DEFAULT 3,
                 queue_threshold INTEGER NOT NULL DEFAULT 5,
+                admin_role_id INTEGER,
+                summary_channel_id INTEGER,
+                summary_time TEXT NOT NULL DEFAULT '08:00',
+                stats_channel_players_id INTEGER,
+                stats_channel_queue_id INTEGER,
+                stats_channel_map_id INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -157,8 +163,30 @@ class Database:
                 UNIQUE(guild_id, pairing_id, entity_id),
                 FOREIGN KEY (pairing_id) REFERENCES rustplus_pairings(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS wipe_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                battlemetrics_server_id INTEGER NOT NULL,
+                map_name TEXT,
+                wiped_at TEXT NOT NULL
+            );
             """
         )
+
+        for query in [
+            "ALTER TABLE guild_settings ADD COLUMN admin_role_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN summary_channel_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN summary_time TEXT NOT NULL DEFAULT '08:00'",
+            "ALTER TABLE guild_settings ADD COLUMN stats_channel_players_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN stats_channel_queue_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN stats_channel_map_id INTEGER",
+        ]:
+            try:
+                await self.conn.execute(query)
+            except Exception:
+                pass
+
         await self.conn.commit()
 
     async def fetchone(self, query: str, params: tuple[Any, ...] = ()) -> aiosqlite.Row | None:
@@ -944,3 +972,108 @@ class Database:
         count = cursor.rowcount
         await cursor.close()
         return count
+
+    async def set_admin_role(self, guild_id: int, role_id: int | None) -> None:
+        now = utc_now_iso()
+        await self.execute(
+            """
+            INSERT INTO guild_settings (guild_id, admin_role_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                admin_role_id = excluded.admin_role_id,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, role_id, now, now),
+        )
+
+    async def set_summary_settings(self, guild_id: int, channel_id: int | None, time_str: str = '08:00') -> None:
+        now = utc_now_iso()
+        await self.execute(
+            """
+            INSERT INTO guild_settings (guild_id, summary_channel_id, summary_time, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                summary_channel_id = excluded.summary_channel_id,
+                summary_time = excluded.summary_time,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, time_str, now, now),
+        )
+
+    async def set_stats_channels(self, guild_id: int, players_id: int | None, queue_id: int | None, map_id: int | None) -> None:
+        now = utc_now_iso()
+        await self.execute(
+            """
+            INSERT INTO guild_settings (
+                guild_id,
+                stats_channel_players_id,
+                stats_channel_queue_id,
+                stats_channel_map_id,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                stats_channel_players_id = excluded.stats_channel_players_id,
+                stats_channel_queue_id = excluded.stats_channel_queue_id,
+                stats_channel_map_id = excluded.stats_channel_map_id,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, players_id, queue_id, map_id, now, now),
+        )
+
+    async def add_wipe_event(self, guild_id: int, server_id: int, map_name: str | None) -> None:
+        now = utc_now_iso()
+        await self.execute(
+            """
+            INSERT INTO wipe_history (guild_id, battlemetrics_server_id, map_name, wiped_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (guild_id, server_id, map_name, now),
+        )
+
+    async def get_wipe_history(self, guild_id: int, server_id: int, limit: int = 5) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM wipe_history
+            WHERE guild_id = ? AND battlemetrics_server_id = ?
+            ORDER BY wiped_at DESC
+            LIMIT ?
+            """,
+            (guild_id, server_id, limit),
+        )
+
+    async def get_active_players_summary(self, guild_id: int, since_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT
+                s.battlemetrics_player_id,
+                p.current_name,
+                SUM(s.duration_seconds) AS total_duration
+            FROM sessions s
+            JOIN players p ON p.battlemetrics_player_id = s.battlemetrics_player_id
+            WHERE s.guild_id = ?
+              AND s.ended_at >= ?
+              AND s.ended_at IS NOT NULL
+            GROUP BY s.battlemetrics_player_id, p.current_name
+            ORDER BY total_duration DESC
+            """,
+            (guild_id, since_iso),
+        )
+
+    async def get_name_changes_summary(self, guild_id: int, since_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT
+                ps.battlemetrics_player_id,
+                ps.last_seen_name,
+                p.current_name,
+                ps.updated_at
+            FROM presence_snapshots ps
+            JOIN players p ON p.battlemetrics_player_id = ps.battlemetrics_player_id
+            WHERE ps.guild_id = ?
+              AND ps.updated_at >= ?
+            """,
+            (guild_id, since_iso),
+        )

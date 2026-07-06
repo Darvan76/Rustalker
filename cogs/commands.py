@@ -101,6 +101,22 @@ async def generate_chart_async(buckets: list[int], player_name: str) -> io.Bytes
     return await asyncio.to_thread(_generate_chart, buckets, player_name)
 
 
+async def is_admin_or_has_role(interaction: discord.Interaction) -> bool:
+    if not interaction.guild:
+        return False
+    if interaction.user.guild_permissions.administrator:
+        return True
+    # Comprobar el admin_role_id configurado en la base de datos
+    db = getattr(interaction.client, "db", None)
+    if db:
+        settings = await db.get_guild_settings(interaction.guild_id)
+        if settings and settings["admin_role_id"]:
+            role = interaction.guild.get_role(settings["admin_role_id"])
+            if role and role in interaction.user.roles:
+                return True
+    return False
+
+
 class CommandsCog(commands.Cog):
     def __init__(self, bot: RustalkerBot) -> None:
         self.bot = bot
@@ -506,6 +522,27 @@ class CommandsCog(commands.Cog):
             logger.error(f"Error in clan_add_member: {e}\n{traceback.format_exc()}")
             await interaction.followup.send("❌ Ocurrió un error al añadir al miembro al clan.")
 
+    @clan_add_member.autocomplete('clan_name')
+    async def clan_add_member_clan_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            clans = await self.bot.db.list_clans(guild_id)
+            choices = []
+            for row in clans:
+                name = row["name"]
+                if current.lower() in name.lower():
+                    choices.append(app_commands.Choice(name=name, value=name))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in clan_add_member_clan_autocomplete: {e}")
+            return []
+
     @clan_group.command(name="remove_member", description="Remueve un jugador de un clan")
     @app_commands.describe(clan_name="Nombre del clan", player_target="Nombre, ID o URL del jugador de BattleMetrics")
     async def clan_remove_member(self, interaction: discord.Interaction, clan_name: str, player_target: str) -> None:
@@ -547,6 +584,55 @@ class CommandsCog(commands.Cog):
             logger.error(f"Error in clan_remove_member: {e}\n{traceback.format_exc()}")
             await interaction.followup.send("❌ Ocurrió un error al remover al miembro.")
 
+    @clan_remove_member.autocomplete('clan_name')
+    async def clan_remove_member_clan_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            clans = await self.bot.db.list_clans(guild_id)
+            choices = []
+            for row in clans:
+                name = row["name"]
+                if current.lower() in name.lower():
+                    choices.append(app_commands.Choice(name=name, value=name))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in clan_remove_member_clan_autocomplete: {e}")
+            return []
+
+    @clan_remove_member.autocomplete('player_target')
+    async def clan_remove_member_player_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            clan_name = getattr(interaction.namespace, "clan_name", None)
+            if not clan_name:
+                return []
+            clan = await self.bot.db.get_clan_by_name(guild_id, clan_name)
+            if not clan:
+                return []
+            members = await self.bot.db.list_clan_members(guild_id, clan["id"])
+            choices = []
+            for m in members:
+                name = m["current_name"]
+                pid = m["battlemetrics_player_id"]
+                if current.lower() in name.lower() or current in str(pid):
+                    choices.append(app_commands.Choice(name=f"{name} ({pid})", value=str(pid)))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in clan_remove_member_player_autocomplete: {e}")
+            return []
+
     # --- SETUP COMMANDS ---
 
     @app_commands.command(name="setup_alerts", description="Configura el canal para las alertas del rastreador")
@@ -554,6 +640,7 @@ class CommandsCog(commands.Cog):
         channel="Canal de texto donde se publicarán las alertas",
         role_mention="Rol de Discord a mencionar en alertas de actividad de clanes (opcional)"
     )
+    @app_commands.check(is_admin_or_has_role)
     async def setup_alerts(
         self,
         interaction: discord.Interaction,
@@ -585,6 +672,7 @@ class CommandsCog(commands.Cog):
         spike_threshold="Cantidad mínima de conexiones para disparar la alerta (por defecto 3)",
         queue_threshold="Avisar cuando la cola de espera de un servidor baje de este número (por defecto 5)"
     )
+    @app_commands.check(is_admin_or_has_role)
     async def setup_rules(
         self,
         interaction: discord.Interaction,
@@ -620,6 +708,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="server_track", description="Añade un servidor de BattleMetrics para monitorear")
     @app_commands.describe(target="ID o URL de BattleMetrics del servidor")
+    @app_commands.check(is_admin_or_has_role)
     async def server_track(self, interaction: discord.Interaction, target: str) -> None:
         await interaction.response.defer()
         guild_id = interaction.guild_id
@@ -647,6 +736,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="server_untrack", description="Detiene el monitoreo de un servidor")
     @app_commands.describe(server_id="ID numérico de BattleMetrics del servidor")
+    @app_commands.check(is_admin_or_has_role)
     async def server_untrack(self, interaction: discord.Interaction, server_id: int) -> None:
         await interaction.response.defer()
         guild_id = interaction.guild_id
@@ -756,6 +846,28 @@ class CommandsCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error in unwatch: {e}\n{traceback.format_exc()}")
             await interaction.followup.send("❌ Ocurrió un error al eliminar al jugador.")
+
+    @unwatch.autocomplete('player_id')
+    async def unwatch_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[int]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            watched = await self.bot.db.list_watch_players(guild_id)
+            choices = []
+            for row in watched:
+                name = row["current_name"]
+                pid = row["battlemetrics_player_id"]
+                if current.lower() in name.lower() or current in str(pid):
+                    choices.append(app_commands.Choice(name=f"{name} ({pid})", value=pid))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in unwatch_autocomplete: {e}")
+            return []
 
     @app_commands.command(name="watchlist", description="Muestra la lista de jugadores vigilados y su estado actual")
     async def watchlist(self, interaction: discord.Interaction) -> None:
@@ -869,6 +981,28 @@ class CommandsCog(commands.Cog):
             _apply,
             prompt_title="Selecciona el jugador para analizar su actividad.",
         )
+
+    @stats.autocomplete('target')
+    async def stats_target_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            watched = await self.bot.db.list_watch_players(guild_id)
+            choices = []
+            for row in watched:
+                name = row["current_name"]
+                pid = row["battlemetrics_player_id"]
+                if current.lower() in name.lower() or current in str(pid):
+                    choices.append(app_commands.Choice(name=f"{name} ({pid})", value=str(pid)))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in stats_target_autocomplete: {e}")
+            return []
 
     @app_commands.command(name="raid_predictor", description="Calcula la ventana óptima de inactividad para un jugador o clan entero")
     @app_commands.describe(
@@ -1035,6 +1169,217 @@ class CommandsCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error in raid_predictor: {e}\n{traceback.format_exc()}")
             await interaction.followup.send("❌ Ocurrió un error al predecir la ventana de raid.")
+
+    @raid_predictor.autocomplete('target_player')
+    async def raid_predictor_player_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            watched = await self.bot.db.list_watch_players(guild_id)
+            choices = []
+            for row in watched:
+                name = row["current_name"]
+                pid = row["battlemetrics_player_id"]
+                if current.lower() in name.lower() or current in str(pid):
+                    choices.append(app_commands.Choice(name=f"{name} ({pid})", value=str(pid)))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in raid_predictor_player_autocomplete: {e}")
+            return []
+
+    @raid_predictor.autocomplete('clan_name')
+    async def raid_predictor_clan_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+        try:
+            clans = await self.bot.db.list_clans(guild_id)
+            choices = []
+            for row in clans:
+                name = row["name"]
+                if current.lower() in name.lower():
+                    choices.append(app_commands.Choice(name=name, value=name))
+            return choices[:25]
+        except Exception as e:
+            logger.error(f"Error in raid_predictor_clan_autocomplete: {e}")
+            return []
+
+    # --- CONFIGURATION COMMANDS ---
+
+    @app_commands.command(name="setup_admin_role", description="Configura el rol administrativo para el bot")
+    @app_commands.describe(role="Rol con permisos para configurar el bot")
+    @app_commands.check(is_admin_or_has_role)
+    async def setup_admin_role(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        await interaction.response.defer()
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.followup.send("❌ Este comando solo se puede usar en servidores.")
+            return
+        try:
+            await self.bot.db.ensure_guild_settings(guild_id)
+            await self.bot.db.set_admin_role(guild_id, role.id)
+            await interaction.followup.send(f"✅ Rol administrativo configurado en {role.mention}.")
+        except Exception as e:
+            logger.error(f"Error in setup_admin_role: {e}\n{traceback.format_exc()}")
+            await interaction.followup.send("❌ Ocurrió un error al configurar el rol administrativo.")
+
+    @app_commands.command(name="setup_stats_channels", description="Configura los canales de voz para estadísticas dinámicas del servidor")
+    @app_commands.describe(
+        players_channel="Canal de voz para la cantidad de jugadores",
+        queue_channel="Canal de voz para la cola de espera",
+        map_channel="Canal de voz para el mapa actual"
+    )
+    @app_commands.check(is_admin_or_has_role)
+    async def setup_stats_channels(
+        self,
+        interaction: discord.Interaction,
+        players_channel: discord.VoiceChannel | None = None,
+        queue_channel: discord.VoiceChannel | None = None,
+        map_channel: discord.VoiceChannel | None = None
+    ) -> None:
+        await interaction.response.defer()
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.followup.send("❌ Este comando solo se puede usar en servidores.")
+            return
+        try:
+            await self.bot.db.ensure_guild_settings(guild_id)
+            players_id = players_channel.id if players_channel else None
+            queue_id = queue_channel.id if queue_channel else None
+            map_id = map_channel.id if map_channel else None
+            
+            await self.bot.db.set_stats_channels(guild_id, players_id, queue_id, map_id)
+            
+            embed = discord.Embed(
+                title="📊 CANALES DE ESTADÍSTICAS CONFIGURADOS",
+                color=discord.Color.blue(),
+                timestamp=discord.utils.utcnow()
+            )
+            embed.add_field(name="Canal Jugadores", value=players_channel.mention if players_channel else "`No configurado`", inline=True)
+            embed.add_field(name="Canal Cola", value=queue_channel.mention if queue_channel else "`No configurado`", inline=True)
+            embed.add_field(name="Canal Mapa", value=map_channel.mention if map_channel else "`No configurado`", inline=True)
+            
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Error in setup_stats_channels: {e}\n{traceback.format_exc()}")
+            await interaction.followup.send("❌ Ocurrió un error al configurar los canales de estadísticas.")
+
+    @app_commands.command(name="setup_summary", description="Configura el canal y la hora del resumen diario")
+    @app_commands.describe(
+        channel="Canal de texto para enviar el resumen",
+        time="Hora del resumen en formato HH:MM (UTC, ej: 08:00, 18:30)"
+    )
+    @app_commands.check(is_admin_or_has_role)
+    async def setup_summary(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        time: str | None = None
+    ) -> None:
+        await interaction.response.defer()
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.followup.send("❌ Este comando solo se puede usar en servidores.")
+            return
+        
+        time_val = time or "08:00"
+        import re
+        if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time_val):
+            await interaction.followup.send("❌ Formato de hora inválido. Debe ser HH:MM en formato de 24 horas (ej: 08:00 o 18:30).")
+            return
+
+        try:
+            await self.bot.db.ensure_guild_settings(guild_id)
+            await self.bot.db.set_summary_settings(guild_id, channel.id, time_val)
+            await interaction.followup.send(f"✅ Canal de resúmenes configurado en {channel.mention} a las `{time_val} UTC`.")
+        except Exception as e:
+            logger.error(f"Error in setup_summary: {e}\n{traceback.format_exc()}")
+            await interaction.followup.send("❌ Ocurrió un error al configurar el resumen diario.")
+
+    @app_commands.command(name="wipe_history", description="Muestra el historial de wipes y estima el siguiente wipe")
+    @app_commands.describe(server_id="ID numérico del servidor de BattleMetrics (opcional)")
+    async def wipe_history(self, interaction: discord.Interaction, server_id: int | None = None) -> None:
+        await interaction.response.defer()
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.followup.send("❌ Este comando solo se puede usar en servidores.")
+            return
+
+        try:
+            if not server_id:
+                servers = await self.bot.db.list_tracked_servers(guild_id)
+                if not servers:
+                    await interaction.followup.send("❌ No hay servidores bajo monitoreo en este servidor de Discord. Configura uno con `/server_track`.")
+                    return
+                if len(servers) == 1:
+                    server_id = int(servers[0]["battlemetrics_server_id"])
+                    server_name = servers[0]["name"] or f"Servidor {server_id}"
+                else:
+                    lines = [f"• **{s['name']}** (ID: `{s['battlemetrics_server_id']}`)" for s in servers]
+                    await interaction.followup.send(
+                        "❌ Este bot está monitoreando múltiples servidores. Por favor, especifica el ID del servidor usando el parámetro `server_id`:\n" + "\n".join(lines)
+                    )
+                    return
+            else:
+                servers = await self.bot.db.list_tracked_servers(guild_id)
+                server_entry = next((s for s in servers if int(s["battlemetrics_server_id"]) == server_id), None)
+                server_name = server_entry["name"] if (server_entry and server_entry["name"]) else f"Servidor {server_id}"
+
+            history = await self.bot.db.get_wipe_history(guild_id, server_id, limit=10)
+            if not history:
+                await interaction.followup.send(f"ℹ️ No se han registrado wipes para el servidor **{server_name}**.")
+                return
+
+            embed = discord.Embed(
+                title=f"📅 HISTORIAL DE WIPES: {server_name.upper()}",
+                color=discord.Color.orange(),
+                timestamp=discord.utils.utcnow()
+            )
+            
+            lines = []
+            for r in history:
+                wiped_dt = dt.datetime.fromisoformat(r["wiped_at"])
+                wiped_str = f"<t:{int(wiped_dt.timestamp())}:f> (<t:{int(wiped_dt.timestamp())}:R>)"
+                map_str = f" | Mapa: `{r['map_name']}`" if r["map_name"] else ""
+                lines.append(f"• {wiped_str}{map_str}")
+            
+            embed.add_field(name="Últimos wipes registrados", value="\n".join(lines[:10]), inline=False)
+            
+            if len(history) >= 2:
+                # Calcular la duración promedio de ciclos de wipe
+                # history está ordenado por wiped_at DESC. Lo ordenamos ASC para las diferencias consecutivas
+                sorted_history = sorted(history, key=lambda x: x["wiped_at"])
+                deltas = []
+                for i in range(len(sorted_history) - 1):
+                    t1 = dt.datetime.fromisoformat(sorted_history[i]["wiped_at"])
+                    t2 = dt.datetime.fromisoformat(sorted_history[i+1]["wiped_at"])
+                    deltas.append((t2 - t1).total_seconds())
+                
+                avg_seconds = sum(deltas) / len(deltas)
+                avg_days = avg_seconds / 86400
+                
+                # Próximo wipe estimado = último wipe + avg_seconds
+                last_wipe_dt = dt.datetime.fromisoformat(history[0]["wiped_at"])
+                next_wipe_dt = last_wipe_dt + dt.timedelta(seconds=avg_seconds)
+                
+                embed.add_field(name="Promedio de Ciclo", value=f"`{round(avg_days, 1)} días`", inline=True)
+                embed.add_field(name="Próximo Wipe Estimado", value=f"<t:{int(next_wipe_dt.timestamp())}:f> (<t:{int(next_wipe_dt.timestamp())}:R>)", inline=True)
+            else:
+                embed.set_footer(text="Se requieren al menos 2 registros de wipes para estimar el próximo.")
+            
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Error in wipe_history: {e}\n{traceback.format_exc()}")
+            await interaction.followup.send("❌ Ocurrió un error al obtener el historial de wipes.")
 
 
 async def setup(bot: RustalkerBot) -> None:

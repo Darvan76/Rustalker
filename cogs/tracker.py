@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import traceback
+import zoneinfo
 from typing import TYPE_CHECKING, Any
 
 import discord
@@ -24,11 +25,17 @@ class TrackerCog(commands.Cog):
         # Dictionary to track last seen queue size to avoid spamming queue alerts
         # {(guild_id, server_id): last_seen_queue}
         self.last_seen_queues: dict[tuple[int, int], int] = {}
+        # Dictionary to throttle channel updates: {(guild_id, channel_id): last_update_time}
+        self.last_channel_updates: dict[tuple[int, int], dt.datetime] = {}
+        # Dictionary to track last daily summary sent date: {guild_id: date}
+        self.last_summary_sent: dict[int, dt.date] = {}
         
         self.tracker_loop.start()
+        self.daily_summary_loop.start()
 
     def cog_unload(self) -> None:
         self.tracker_loop.cancel()
+        self.daily_summary_loop.cancel()
 
     @tasks.loop(seconds=60)
     async def tracker_loop(self) -> None:
@@ -101,6 +108,7 @@ class TrackerCog(commands.Cog):
         last_map = server_row["last_map"]
         current_map = server_data["map"]
         if last_map and current_map and last_map.lower() != current_map.lower():
+            await self.bot.db.add_wipe_event(guild_id, server_id, current_map)
             if alert_channel:
                 embed = discord.Embed(
                     title="✨ POSIBLE WIPE DETECTADO (CAMBIO DE MAPA)",
@@ -146,6 +154,24 @@ class TrackerCog(commands.Cog):
             max_players=server_data["max_players"],
             queue=server_data["queue"]
         )
+
+        # 3.1 Update dynamic voice channels if configured
+        players_channel_id = settings.get("stats_channel_players_id")
+        queue_channel_id = settings.get("stats_channel_queue_id")
+        map_channel_id = settings.get("stats_channel_map_id")
+
+        if players_channel_id:
+            players_count = server_data.get("players", 0)
+            max_players = server_data.get("max_players", 0)
+            await self._update_stats_channel(guild, players_channel_id, f"👥 Jugadores: {players_count}/{max_players}")
+
+        if queue_channel_id:
+            queue_count = server_data.get("queue", 0)
+            await self._update_stats_channel(guild, queue_channel_id, f"🎫 Cola: {queue_count}")
+
+        if map_channel_id:
+            map_name = server_data.get("map", "Desconocido")
+            await self._update_stats_channel(guild, map_channel_id, f"🗺️ Mapa: {map_name}")
 
         # 4. Track Players Presence
         # Fetch the current watchlist for this guild
@@ -371,6 +397,191 @@ class TrackerCog(commands.Cog):
 
                 mention_content = f"<@&{mention_role_id}>" if mention_role_id else ""
                 await alert_channel.send(content=mention_content, embed=embed)
+
+    async def _update_stats_channel(self, guild: discord.Guild, channel_id: int | None, new_name: str) -> None:
+        if not channel_id:
+            return
+        guild_id = guild.id
+        now = dt.datetime.now(dt.timezone.utc)
+        
+        # Check throttling
+        last_update = self.last_channel_updates.get((guild_id, channel_id))
+        if last_update is not None and (now - last_update) < dt.timedelta(minutes=10):
+            return
+            
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            return
+            
+        if channel.name == new_name:
+            return
+            
+        try:
+            await channel.edit(name=new_name)
+            self.last_channel_updates[(guild_id, channel_id)] = now
+            logger.info(f"Updated voice channel {channel_id} in guild {guild_id} to '{new_name}'")
+        except discord.Forbidden:
+            logger.warning(f"Missing permissions to edit voice channel {channel_id} in guild {guild_id}")
+        except discord.NotFound:
+            logger.warning(f"Voice channel {channel_id} not found in guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Failed to update voice channel {channel_id} in guild {guild_id}: {e}")
+
+    @tasks.loop(minutes=1)
+    async def daily_summary_loop(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+            rows = await self.bot.db.fetchall("SELECT * FROM guild_settings WHERE summary_channel_id IS NOT NULL")
+            for settings in rows:
+                guild_id = int(settings["guild_id"])
+                guild = self.bot.get_guild(guild_id)
+                if guild is None:
+                    continue
+                
+                # Check timezone and current time
+                tz_name = settings["timezone"] or "UTC"
+                try:
+                    tz = zoneinfo.ZoneInfo(tz_name)
+                except Exception:
+                    tz = dt.timezone.utc
+                
+                now_local = dt.datetime.now(tz)
+                current_time_str = now_local.strftime("%H:%M")
+                current_date = now_local.date()
+                
+                # Check summary_time matches
+                if current_time_str != settings["summary_time"]:
+                    continue
+                    
+                # Already sent today?
+                if self.last_summary_sent.get(guild_id) == current_date:
+                    continue
+                
+                # Compile and send summary
+                await self._send_daily_summary(guild, settings, current_date)
+        except Exception as e:
+            logger.error(f"Error in daily summary loop: {e}\n{traceback.format_exc()}")
+
+    async def _send_daily_summary(self, guild: discord.Guild, settings: Any, current_date: dt.date) -> None:
+        guild_id = guild.id
+        summary_channel_id = settings["summary_channel_id"]
+        
+        # 1. Get channel
+        channel = guild.get_channel(summary_channel_id)
+        if not channel:
+            try:
+                channel = await self.bot.fetch_channel(summary_channel_id)
+            except Exception:
+                logger.warning(f"Summary channel {summary_channel_id} not found/accessible in guild {guild_id}")
+                return
+                
+        # 2. Gather data for the last 24 hours
+        since_dt = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=24)
+        since_iso = since_dt.isoformat()
+        
+        # - Active players
+        active_players = await self.bot.db.get_active_players_summary(guild_id, since_iso)
+        active_players_lines = []
+        for idx, p in enumerate(active_players[:10], 1):
+            duration_min = int(p["total_duration"] // 60)
+            if duration_min >= 60:
+                h = duration_min // 60
+                m = duration_min % 60
+                duration_str = f"{h}h {m}m"
+            else:
+                duration_str = f"{duration_min}m"
+            active_players_lines.append(
+                f"{idx}. [{p['current_name']}](https://www.battlemetrics.com/players/{p['battlemetrics_player_id']}) - **{duration_str}**"
+            )
+        active_players_text = "\n".join(active_players_lines) if active_players_lines else "No se registró actividad de jugadores en las últimas 24 horas."
+        
+        # - Name changes
+        name_changes = await self.bot.db.get_name_changes_summary(guild_id, since_iso)
+        changed_names_lines = []
+        for row in name_changes:
+            old_name = row["last_seen_name"]
+            new_name = row["current_name"]
+            pid = row["battlemetrics_player_id"]
+            if old_name and old_name != new_name:
+                changed_names_lines.append(
+                    f"• `{old_name}` ➡️ **{new_name}** ([BM](https://www.battlemetrics.com/players/{pid}))"
+                )
+        name_changes_text = "\n".join(changed_names_lines[:10]) if changed_names_lines else "No se detectaron cambios de nombre en las últimas 24 horas."
+        
+        # - Tracked servers
+        tracked_servers = await self.bot.db.list_tracked_servers(guild_id)
+        server_status_lines = []
+        for s in tracked_servers:
+            status = f"**{s['name']}**\n"
+            status += f"• 🗺️ Mapa: `{s['last_map'] or 'Desconocido'}`\n"
+            status += f"• 👥 Jugadores: `{s['last_player_count'] or 0}/{s['last_max_players'] or 0}`"
+            if s["last_queue"]:
+                status += f" (Cola: `{s['last_queue']}`)"
+            status += f"\n• 🔗 IP: `{s['last_ip'] or 'Desconocido'}:{s['last_port'] or 0}`"
+            server_status_lines.append(status)
+        server_status_text = "\n\n".join(server_status_lines) if server_status_lines else "No hay servidores configurados para monitoreo."
+        
+        # - Wipes estimation
+        last_wipe_text = "Sin historial de wipes"
+        next_wipe_prediction_text = "No hay datos suficientes para estimar"
+        
+        if tracked_servers:
+            primary_server = tracked_servers[0]
+            server_id = primary_server["battlemetrics_server_id"]
+            
+            wipes = await self.bot.db.get_wipe_history(guild_id, server_id, limit=20)
+            if wipes:
+                last_wipe = wipes[0]
+                try:
+                    last_wipe_dt = dt.datetime.fromisoformat(last_wipe["wiped_at"])
+                    last_wipe_text = f"`{last_wipe_dt.strftime('%Y-%m-%d %H:%M UTC')}`"
+                except Exception:
+                    last_wipe_text = f"`{last_wipe['wiped_at']}`"
+                    last_wipe_dt = None
+                    
+                if len(wipes) >= 2:
+                    intervals = []
+                    for i in range(len(wipes) - 1):
+                        try:
+                            dt1 = dt.datetime.fromisoformat(wipes[i]["wiped_at"])
+                            dt2 = dt.datetime.fromisoformat(wipes[i+1]["wiped_at"])
+                            diff = (dt1 - dt2).total_seconds() / 86400.0
+                            intervals.append(diff)
+                        except Exception:
+                            continue
+                    if intervals:
+                        avg_days = sum(intervals) / len(intervals)
+                        if last_wipe_dt:
+                            next_wipe_dt = last_wipe_dt + dt.timedelta(days=avg_days)
+                            next_wipe_prediction_text = f"`{next_wipe_dt.strftime('%Y-%m-%d %H:%M UTC')}` (promedio de `{avg_days:.1f}` días)"
+                        else:
+                            next_wipe_prediction_text = f"Promedio estimado: `{avg_days:.1f}` días desde el último wipe"
+                    else:
+                        next_wipe_prediction_text = "No se pudieron calcular los intervalos"
+                else:
+                    next_wipe_prediction_text = "Se requieren al menos 2 wipes registrados en el historial para estimar."
+                    
+        # 3. Create Embed
+        embed = discord.Embed(
+            title="📊 RESUMEN DIARIO DE ACTIVIDAD",
+            description="Informe de monitoreo de las últimas 24 horas.",
+            color=discord.Color.orange(),
+            timestamp=dt.datetime.now(dt.timezone.utc)
+        )
+        embed.add_field(name="🖥️ Estado de Servidor(es)", value=server_status_text, inline=False)
+        embed.add_field(name="👥 Jugadores más Activos (Últimas 24h)", value=active_players_text, inline=False)
+        embed.add_field(name="🔄 Cambios de Nombre (Últimas 24h)", value=name_changes_text, inline=False)
+        embed.add_field(name="✨ Último Wipe", value=last_wipe_text, inline=True)
+        embed.add_field(name="🔮 Siguiente Wipe Estimado", value=next_wipe_prediction_text, inline=True)
+        embed.set_footer(text="Rustalker Bot • Resumen automático")
+        
+        # Send
+        try:
+            await channel.send(embed=embed)
+            self.last_summary_sent[guild_id] = current_date
+            logger.info(f"Daily summary sent successfully to guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Failed to send daily summary to guild {guild_id}: {e}")
 
 
 async def setup(bot: RustalkerBot) -> None:

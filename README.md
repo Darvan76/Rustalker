@@ -1,6 +1,10 @@
 # Rustalker
 
 <p align="center">
+  <img src="assets/rustalker.png" alt="Rustalker Logo" width="180" />
+</p>
+
+<p align="center">
   <strong>Discord bot para Rust + BattleMetrics</strong><br>
   Rastrea servidores, vigila jugadores, genera alertas tácticas y crea análisis de actividad desde un solo panel.
 </p>

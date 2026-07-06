@@ -53,6 +53,9 @@ class RustalkerBot(commands.Bot):
         logger.info("Loading cogs...")
         await self.load_extension("cogs.tracker")
         await self.load_extension("cogs.commands")
+        await self.load_extension("cogs.rustplus_cog")
+
+
 
     async def close(self) -> None:
         logger.info("Shutting down cleanly...")

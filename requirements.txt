@@ -3,3 +3,4 @@ aiohttp>=3.9.5
 aiosqlite>=0.20.0
 python-dotenv>=1.0.1
 matplotlib>=3.8.4
+rustplus>=6.0.0

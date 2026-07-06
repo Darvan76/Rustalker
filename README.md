@@ -159,6 +159,8 @@ Ejemplo:
 
 ## Comandos principales
 
+### BattleMetrics / Monitoreo
+
 | Comando | Uso |
 | --- | --- |
 | `/tuto` | Muestra la guía rápida dentro de Discord |
@@ -177,12 +179,60 @@ Ejemplo:
 | `/clan add_member` | Añade un miembro a un clan |
 | `/clan remove_member` | Elimina un miembro de un clan |
 
+### Rust+ (Integración directa con el servidor)
+
+| Comando | Uso |
+| --- | --- |
+| `/rustplus pair` | Empareja el bot con un servidor de Rust vía Rust+ |
+| `/rustplus unpair` | Desempareja un servidor |
+| `/rustplus list` | Lista los servidores emparejados y su estado |
+| `/rustplus server_info` | Información en tiempo real del servidor |
+| `/rustplus team_info` | Miembros del equipo y estado online/offline |
+| `/rustplus send_message` | Envía un mensaje al chat de equipo del juego |
+| `/rustplus alarm_add` | Registra una alarma inteligente (Smart Alarm) |
+| `/rustplus alarm_remove` | Elimina una alarma registrada |
+| `/rustplus alarm_list` | Lista las alarmas de un servidor |
+| `/rustplus switch_add` | Registra un interruptor inteligente (Smart Switch) |
+| `/rustplus switch_remove` | Elimina un interruptor registrado |
+| `/rustplus switch_on` | Activa un Smart Switch desde Discord |
+| `/rustplus switch_off` | Desactiva un Smart Switch desde Discord |
+| `/rustplus reconnect` | Reconecta el socket de un servidor |
+
+## Integración Rust+
+
+Rustalker puede conectarse directamente a tu servidor de Rust a través del protocolo Rust+ (WebSocket), sin necesidad de ser administrador ni modificar el servidor.
+
+### Cómo obtener el `player_token`
+
+1. Descarga la app oficial de **Rust+** en tu móvil.
+2. En el juego, abre el menú y empareja tu base con la app.
+3. Usa una de estas herramientas para capturar el token generado:
+   - Extensión de navegador de la comunidad rustplus.py (disponible en su documentación).
+   - Acceso al archivo `player.tokens.db` si eres administrador del servidor.
+4. Una vez tengas el token, usa `/rustplus pair` en Discord.
+
+### Flujo de trabajo típico
+
+```text
+1. /rustplus pair ip:123.45.67.89 port:28082 steam_id:76561198XXXX player_token:XXXXX
+2. /rustplus alarm_add pairing_id:1 entity_id:123456 label:"Puerta principal" channel:#alertas
+3. /rustplus switch_add pairing_id:1 entity_id:789012 label:"Torretas"
+4. /rustplus switch_on pairing_id:1 entity_id:789012   → ¡Torretas activadas desde Discord!
+```
+
+### Funcionalidades en tiempo real
+
+- **Alertas de raid:** Cuando una Smart Alarm del juego se activa (explosión, intruso), el bot envía un embed de alerta inmediata al canal configurado.
+- **Relay de chat:** Los mensajes del chat de equipo del juego se reenvían automáticamente a un canal de Discord, y viceversa con `/rustplus send_message`.
+- **Control de dispositivos:** Activa o desactiva torretas, generadores o trampas directamente con botones en Discord.
+
 ## Estructura
 
 - `main.py` arranque del bot y carga de extensiones.
 - `cogs/commands.py` comandos slash y utilidades de análisis.
-- `cogs/tracker.py` tareas en segundo plano para alertas.
-- `database.py` capa SQLite y esquema.
+- `cogs/tracker.py` tareas en segundo plano para alertas de BattleMetrics.
+- `cogs/rustplus_cog.py` integración completa con Rust+ via WebSocket.
+- `database.py` capa SQLite y esquema (incluye tablas Rust+).
 - `battlemetrics.py` cliente para la API de BattleMetrics.
 
 ## Notas
@@ -190,3 +240,5 @@ Ejemplo:
 - La sincronización global de slash commands puede tardar un poco en reflejarse.
 - Si el bot no responde, revisa el token de Discord y el acceso de red a BattleMetrics.
 - El archivo de base de datos se puede borrar si quieres empezar desde cero.
+- La integración Rust+ es **opcional**: si no instalas `rustplus` o no configuras ningún pairing, el resto del bot funciona con normalidad.
+- El puerto Companion de Rust+ (por defecto `28082`) es **diferente** al puerto del juego (normalmente `28015`).

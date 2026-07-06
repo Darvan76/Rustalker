@@ -117,6 +117,46 @@ class Database:
                 ended_at TEXT,
                 duration_seconds INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS rustplus_pairings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                battlemetrics_server_id INTEGER,
+                server_name TEXT NOT NULL DEFAULT 'Rust Server',
+                ip TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 28082,
+                steam_id TEXT NOT NULL,
+                player_token TEXT NOT NULL,
+                alarm_channel_id INTEGER,
+                chat_channel_id INTEGER,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(guild_id, ip, port)
+            );
+
+            CREATE TABLE IF NOT EXISTS rustplus_alarms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                pairing_id INTEGER NOT NULL,
+                entity_id INTEGER NOT NULL,
+                label TEXT NOT NULL DEFAULT 'Alarma',
+                channel_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(guild_id, pairing_id, entity_id),
+                FOREIGN KEY (pairing_id) REFERENCES rustplus_pairings(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS rustplus_switches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                pairing_id INTEGER NOT NULL,
+                entity_id INTEGER NOT NULL,
+                label TEXT NOT NULL DEFAULT 'Interruptor',
+                created_at TEXT NOT NULL,
+                UNIQUE(guild_id, pairing_id, entity_id),
+                FOREIGN KEY (pairing_id) REFERENCES rustplus_pairings(id) ON DELETE CASCADE
+            );
             """
         )
         await self.conn.commit()
@@ -726,3 +766,181 @@ class Database:
             """,
             (guild_id, server_id),
         )
+
+    # ─────────────────────────────────────────
+    # Rust+ Pairings
+    # ─────────────────────────────────────────
+
+    async def add_rustplus_pairing(
+        self,
+        guild_id: int,
+        server_ip: str,
+        companion_port: int,
+        steam_id: str,
+        player_token: str,
+        server_name: str | None = None,
+        battlemetrics_server_id: int | None = None,
+    ) -> int:
+        now = utc_now_iso()
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            """
+            INSERT INTO rustplus_pairings (
+                guild_id, battlemetrics_server_id, server_ip, companion_port,
+                steam_id, player_token, server_name, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(guild_id, server_ip, companion_port) DO UPDATE SET
+                steam_id = excluded.steam_id,
+                player_token = excluded.player_token,
+                server_name = COALESCE(excluded.server_name, rustplus_pairings.server_name),
+                battlemetrics_server_id = COALESCE(excluded.battlemetrics_server_id, rustplus_pairings.battlemetrics_server_id),
+                is_active = 1,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, battlemetrics_server_id, server_ip, companion_port,
+             steam_id, player_token, server_name, now, now),
+        )
+        await self.conn.commit()
+        row_id = cursor.lastrowid
+        await cursor.close()
+        return int(row_id)
+
+    async def get_rustplus_pairing(self, guild_id: int, pairing_id: int) -> aiosqlite.Row | None:
+        return await self.fetchone(
+            "SELECT * FROM rustplus_pairings WHERE guild_id = ? AND id = ?",
+            (guild_id, pairing_id),
+        )
+
+    async def list_rustplus_pairings(self, guild_id: int) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT * FROM rustplus_pairings WHERE guild_id = ? ORDER BY server_name",
+            (guild_id,),
+        )
+
+    async def remove_rustplus_pairing(self, guild_id: int, pairing_id: int) -> int:
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            "DELETE FROM rustplus_pairings WHERE guild_id = ? AND id = ?",
+            (guild_id, pairing_id),
+        )
+        await self.conn.commit()
+        count = cursor.rowcount
+        await cursor.close()
+        return count
+
+    async def set_rustplus_pairing_channels(
+        self,
+        guild_id: int,
+        pairing_id: int,
+        alarm_channel_id: int | None = None,
+        chat_relay_channel_id: int | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        await self.execute(
+            """
+            UPDATE rustplus_pairings
+            SET alarm_channel_id = COALESCE(?, alarm_channel_id),
+                chat_relay_channel_id = COALESCE(?, chat_relay_channel_id),
+                updated_at = ?
+            WHERE guild_id = ? AND id = ?
+            """,
+            (alarm_channel_id, chat_relay_channel_id, now, guild_id, pairing_id),
+        )
+
+    async def set_rustplus_pairing_active(self, guild_id: int, pairing_id: int, is_active: bool) -> None:
+        now = utc_now_iso()
+        await self.execute(
+            "UPDATE rustplus_pairings SET is_active = ?, updated_at = ? WHERE guild_id = ? AND id = ?",
+            (1 if is_active else 0, now, guild_id, pairing_id),
+        )
+
+    # ─────────────────────────────────────────
+    # Rust+ Alarms
+    # ─────────────────────────────────────────
+
+    async def add_rustplus_alarm(
+        self,
+        guild_id: int,
+        pairing_id: int,
+        entity_id: int,
+        label: str = 'Alarma',
+        notify_channel_id: int | None = None,
+    ) -> int:
+        now = utc_now_iso()
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            """
+            INSERT INTO rustplus_alarms (guild_id, pairing_id, entity_id, label, notify_channel_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, pairing_id, entity_id) DO UPDATE SET
+                label = excluded.label,
+                notify_channel_id = COALESCE(excluded.notify_channel_id, rustplus_alarms.notify_channel_id)
+            """,
+            (guild_id, pairing_id, entity_id, label, notify_channel_id, now),
+        )
+        await self.conn.commit()
+        row_id = cursor.lastrowid
+        await cursor.close()
+        return int(row_id)
+
+    async def list_rustplus_alarms(self, guild_id: int, pairing_id: int) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT * FROM rustplus_alarms WHERE guild_id = ? AND pairing_id = ? ORDER BY label",
+            (guild_id, pairing_id),
+        )
+
+    async def remove_rustplus_alarm(self, guild_id: int, alarm_id: int) -> int:
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            "DELETE FROM rustplus_alarms WHERE guild_id = ? AND id = ?",
+            (guild_id, alarm_id),
+        )
+        await self.conn.commit()
+        count = cursor.rowcount
+        await cursor.close()
+        return count
+
+    # ─────────────────────────────────────────
+    # Rust+ Smart Switches
+    # ─────────────────────────────────────────
+
+    async def add_rustplus_switch(
+        self,
+        guild_id: int,
+        pairing_id: int,
+        entity_id: int,
+        label: str = 'Interruptor',
+    ) -> int:
+        now = utc_now_iso()
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            """
+            INSERT INTO rustplus_switches (guild_id, pairing_id, entity_id, label, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, pairing_id, entity_id) DO UPDATE SET
+                label = excluded.label
+            """,
+            (guild_id, pairing_id, entity_id, label, now),
+        )
+        await self.conn.commit()
+        row_id = cursor.lastrowid
+        await cursor.close()
+        return int(row_id)
+
+    async def list_rustplus_switches(self, guild_id: int, pairing_id: int) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT * FROM rustplus_switches WHERE guild_id = ? AND pairing_id = ? ORDER BY label",
+            (guild_id, pairing_id),
+        )
+
+    async def remove_rustplus_switch(self, guild_id: int, switch_id: int) -> int:
+        assert self.conn is not None
+        cursor = await self.conn.execute(
+            "DELETE FROM rustplus_switches WHERE guild_id = ? AND id = ?",
+            (guild_id, switch_id),
+        )
+        await self.conn.commit()
+        count = cursor.rowcount
+        await cursor.close()
+        return count

@@ -54,6 +54,7 @@ class RustalkerBot(commands.Bot):
         await self.load_extension("cogs.tracker")
         await self.load_extension("cogs.commands")
         await self.load_extension("cogs.rustplus_cog")
+        await self.load_extension("cogs.setup_wizard")
 
 
 

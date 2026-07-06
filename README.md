@@ -5,92 +5,97 @@
 </p>
 
 <p align="center">
-  <strong>Discord bot para Rust + BattleMetrics</strong><br>
-  Rastrea servidores, vigila jugadores, genera alertas tácticas y crea análisis de actividad desde un solo panel.
+  <strong>Discord bot for Rust + BattleMetrics</strong><br>
+  Track servers, watch players, get tactical alerts and activity analysis — all from a single panel.
 </p>
 
 ---
 
-## ¿Qué es Rustalker?
+## What is Rustalker?
 
-Rustalker es un bot de Discord pensado para clanes, administradores y equipos de Rust que quieren centralizar su inteligencia táctica con BattleMetrics.
+Rustalker is a Discord bot built for Rust clans, server admins and competitive teams who want to centralise their tactical intelligence using BattleMetrics and Rust+.
 
-Con Rustalker puedes:
+With Rustalker you can:
 
-- Monitorear servidores de BattleMetrics.
-- Vigilar jugadores y recibir alertas de conexión y desconexión.
-- Registrar clanes y miembros.
-- Generar estadísticas de actividad por hora.
-- Calcular ventanas óptimas de inactividad para raids.
+- Monitor BattleMetrics servers in real time.
+- Watch players and receive instant connection / disconnection alerts.
+- Register clans and their members.
+- Generate hourly activity statistics with dark-style charts.
+- Calculate optimal offline windows for raids.
+- Connect directly to your Rust server via **Rust+** (WebSocket) for live alarms, team chat relay and Smart Switch control.
 
 ## Stack
 
-- Python
-- discord.py
+- Python 3.11+
+- discord.py ≥ 2.4
 - aiohttp
 - aiosqlite
 - matplotlib
 - python-dotenv
+- rustplus ≥ 6.0
 
-## Características
+## Features
 
-- Slash commands modernos.
-- Base de datos SQLite creada automáticamente.
-- Alertas en tiempo real por canal y rol.
-- Selector interactivo cuando hay varios resultados posibles.
-- Gráficas de actividad con estilo oscuro.
-- Modo limitado si no configuras `BATTLEMETRICS_TOKEN`.
+- Modern slash commands with Discord's app commands framework.
+- SQLite database created automatically on first run.
+- Real-time alerts routed to configurable channels and role mentions.
+- Interactive player selector when multiple BattleMetrics results match.
+- Dark-themed activity charts generated with matplotlib.
+- Limited mode if `BATTLEMETRICS_TOKEN` is not set.
+- **Rust+ integration** (optional): persistent WebSocket connections per server for Smart Alarms, team chat relay and Smart Switch toggling.
 
-## Requisitos
+## Requirements
 
-- Python 3.11 o superior.
-- Un bot creado en el Discord Developer Portal.
-- Un token de BattleMetrics es muy recomendable.
+- Python 3.11 or higher.
+- A bot application created in the [Discord Developer Portal](https://discord.com/developers/applications).
+- A BattleMetrics API token is strongly recommended.
+- A Rust+ player token is required for the Rust+ integration (see below).
 
-## Instalación
+## Installation
 
-### 1. Clona el repositorio
+### 1. Clone the repository
 
 ```bash
-git clone <URL_DE_TU_REPOSITORIO>
+git clone <YOUR_REPOSITORY_URL>
 cd Rustalker
 ```
 
-### 2. Crea y activa un entorno virtual
+### 2. Create and activate a virtual environment
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # macOS / Linux
 ```
 
-### 3. Instala dependencias
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configura el archivo `.env`
+### 4. Configure the `.env` file
 
-Copia `.env.example` a `.env` y completa los valores:
+Copy `.env.example` to `.env` and fill in the values:
 
 ```env
-DISCORD_BOT_TOKEN=tu_token_de_discord
-BATTLEMETRICS_TOKEN=tu_token_de_battlemetrics
+DISCORD_BOT_TOKEN=your_discord_bot_token
+BATTLEMETRICS_TOKEN=your_battlemetrics_token
 DATABASE_PATH=rustalker.db
 ```
 
-Si no tienes `BATTLEMETRICS_TOKEN`, el bot arrancará con funcionalidades limitadas, pero varios comandos no podrán consultar datos.
+If you omit `BATTLEMETRICS_TOKEN` the bot will start in limited mode and several commands won't be able to retrieve data.
 
-### 5. Crea el bot en Discord
+### 5. Create the bot in Discord
 
-1. Entra al [Discord Developer Portal](https://discord.com/developers/applications).
-2. Crea una nueva aplicación.
-3. Ve a la sección **Bot** y crea el bot.
-4. Copia el token y colócalo en `DISCORD_BOT_TOKEN`.
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Create a new application.
+3. Navigate to the **Bot** section and create the bot.
+4. Copy the token and paste it into `DISCORD_BOT_TOKEN`.
 
-### 6. Invita el bot a tu servidor
+### 6. Invite the bot to your server
 
-Usa un enlace OAuth2 con estos permisos mínimos:
+Use an OAuth2 link with at minimum these permissions:
 
 - `applications.commands`
 - `Send Messages`
@@ -98,151 +103,162 @@ Usa un enlace OAuth2 con estos permisos mínimos:
 - `Attach Files`
 - `Read Message History`
 
-Si quieres que publique alertas en canales concretos, asegúrate de darle acceso a esos canales.
+Make sure the bot has access to any channels where you want alerts to be posted.
 
-### 7. Ejecuta el bot
+### 7. Run the bot
 
 ```bash
 python main.py
 ```
 
-La base de datos SQLite se creará automáticamente en el archivo definido por `DATABASE_PATH`.
+The SQLite database file will be created automatically at the path defined by `DATABASE_PATH`.
 
-## Tutorial de uso
+---
 
-### Configuración inicial
+## Usage Guide
 
-1. Ejecuta `/setup_alerts` para definir el canal donde llegarán las alertas.
-2. Si quieres, añade un rol para menciones en alertas críticas.
-3. Ejecuta `/setup_rules` para ajustar los umbrales tácticos.
+### Initial setup
 
-Ejemplo:
+1. Run `/setup_alerts` to define the channel where alerts will be sent.
+2. Optionally add a role to be mentioned in critical alerts.
+3. Run `/setup_rules` to fine-tune tactical thresholds.
 
 ```text
-/setup_alerts channel:#alertas role_mention:@Raid Team
+/setup_alerts channel:#alerts role_mention:@Raid Team
 /setup_rules spike_window:15 spike_threshold:3 queue_threshold:5
 ```
 
-### Monitoreo de servidores
+### Server monitoring
 
-1. Usa `/server_track` con la URL o el ID del servidor de BattleMetrics.
-2. El bot empezará a revisar mapa, cola, población y jugadores incluidos.
-3. Para dejar de rastrearlo usa `/server_untrack`.
-
-Ejemplo:
+1. Use `/server_track` with the BattleMetrics URL or server ID.
+2. The bot will start checking the map, queue, population and watched players.
+3. Use `/server_untrack` to stop monitoring a server.
 
 ```text
-/server_track target: https://www.battlemetrics.com/servers/rust/123456
+/server_track target:https://www.battlemetrics.com/servers/rust/123456
 /server_untrack server_id:123456
 ```
 
-### Watchlist de jugadores
+### Player watchlist
 
-1. Añade jugadores con `/watch`.
-2. Puedes sumar notas y un canal personalizado para ese jugador.
-3. Revisa el estado actual con `/watchlist`.
-4. Elimina un jugador con `/unwatch`.
-
-Ejemplo:
+1. Add players with `/watch`.
+2. Attach notes and a custom alert channel per player.
+3. Check current status with `/watchlist`.
+4. Remove a player with `/unwatch`.
 
 ```text
-/watch target:PlayerName notes:"Líder del clan enemigo" custom_channel:#seguimiento
+/watch target:PlayerName notes:"Enemy clan leader" custom_channel:#tracking
 ```
 
-### Clanes
+### Clans
 
-1. Crea un clan con `/clan create`.
-2. Lista los clanes con `/clan list`.
-3. Agrega o quita miembros con `/clan add_member` y `/clan remove_member`.
+1. Create a clan with `/clan create`.
+2. List all clans with `/clan list`.
+3. Add or remove members with `/clan add_member` and `/clan remove_member`.
 
-### Análisis
+### Analysis
 
-- `/check_player` muestra el perfil completo del jugador.
-- `/stats` genera una gráfica de actividad por hora.
-- `/raid_predictor` calcula la mejor ventana de inactividad.
+- `/check_player` — shows the complete player profile.
+- `/stats` — generates an hourly activity chart for the last N days.
+- `/raid_predictor` — calculates the optimal offline raid window.
 
-## Comandos principales
+---
 
-### BattleMetrics / Monitoreo
+## Commands
 
-| Comando | Uso |
+### BattleMetrics / Monitoring
+
+| Command | Description |
 | --- | --- |
-| `/tuto` | Muestra la guía rápida dentro de Discord |
-| `/setup_alerts` | Configura el canal de alertas |
-| `/setup_rules` | Ajusta umbrales tácticos |
-| `/server_track` | Empieza a monitorear un servidor |
-| `/server_untrack` | Detiene el monitoreo |
-| `/watch` | Añade un jugador a la watchlist |
-| `/unwatch` | Elimina un jugador vigilado |
-| `/watchlist` | Muestra jugadores vigilados |
-| `/check_player` | Consulta un jugador |
-| `/stats` | Genera estadísticas de actividad |
-| `/raid_predictor` | Calcula la ventana óptima de raid |
-| `/clan create` | Crea un clan |
-| `/clan list` | Lista los clanes guardados |
-| `/clan add_member` | Añade un miembro a un clan |
-| `/clan remove_member` | Elimina un miembro de un clan |
+| `/tuto` | Shows the quick-start guide inside Discord |
+| `/setup_alerts` | Configures the alerts channel and mention role |
+| `/setup_rules` | Adjusts tactical alert thresholds |
+| `/server_track` | Starts monitoring a BattleMetrics server |
+| `/server_untrack` | Stops monitoring a server |
+| `/watch` | Adds a player to the watchlist |
+| `/unwatch` | Removes a watched player |
+| `/watchlist` | Lists all watched players and their status |
+| `/check_player` | Looks up a player's full profile |
+| `/stats` | Generates an hourly activity chart |
+| `/raid_predictor` | Calculates the optimal offline raid window |
+| `/clan create` | Creates a new clan |
+| `/clan list` | Lists all saved clans |
+| `/clan add_member` | Adds a member to a clan |
+| `/clan remove_member` | Removes a member from a clan |
 
-### Rust+ (Integración directa con el servidor)
+### Rust+ (Direct server integration)
 
-| Comando | Uso |
+| Command | Description |
 | --- | --- |
-| `/rustplus pair` | Empareja el bot con un servidor de Rust vía Rust+ |
-| `/rustplus unpair` | Desempareja un servidor |
-| `/rustplus list` | Lista los servidores emparejados y su estado |
-| `/rustplus server_info` | Información en tiempo real del servidor |
-| `/rustplus team_info` | Miembros del equipo y estado online/offline |
-| `/rustplus send_message` | Envía un mensaje al chat de equipo del juego |
-| `/rustplus alarm_add` | Registra una alarma inteligente (Smart Alarm) |
-| `/rustplus alarm_remove` | Elimina una alarma registrada |
-| `/rustplus alarm_list` | Lista las alarmas de un servidor |
-| `/rustplus switch_add` | Registra un interruptor inteligente (Smart Switch) |
-| `/rustplus switch_remove` | Elimina un interruptor registrado |
-| `/rustplus switch_on` | Activa un Smart Switch desde Discord |
-| `/rustplus switch_off` | Desactiva un Smart Switch desde Discord |
-| `/rustplus reconnect` | Reconecta el socket de un servidor |
+| `/rustplus pair` | Pairs the bot with a Rust server via Rust+ |
+| `/rustplus unpair` | Removes a pairing and disconnects the socket |
+| `/rustplus list` | Lists all pairings and their connection status |
+| `/rustplus server_info` | Shows live server info (players, map, seed, time) |
+| `/rustplus team_info` | Shows team members and their online/offline status |
+| `/rustplus send_message` | Sends a message to the in-game team chat |
+| `/rustplus alarm_add` | Registers a Smart Alarm entity |
+| `/rustplus alarm_remove` | Removes a registered alarm |
+| `/rustplus alarm_list` | Lists all alarms for a pairing |
+| `/rustplus switch_add` | Registers a Smart Switch entity |
+| `/rustplus switch_remove` | Removes a registered switch |
+| `/rustplus switch_on` | Turns a Smart Switch ON from Discord |
+| `/rustplus switch_off` | Turns a Smart Switch OFF from Discord |
+| `/rustplus reconnect` | Disconnects and reconnects the socket for a pairing |
 
-## Integración Rust+
+---
 
-Rustalker puede conectarse directamente a tu servidor de Rust a través del protocolo Rust+ (WebSocket), sin necesidad de ser administrador ni modificar el servidor.
+## Rust+ Integration
 
-### Cómo obtener el `player_token`
+Rustalker can connect directly to your Rust server through the Rust+ companion protocol (WebSocket) without needing server admin access or any server-side mods.
 
-1. Descarga la app oficial de **Rust+** en tu móvil.
-2. En el juego, abre el menú y empareja tu base con la app.
-3. Usa una de estas herramientas para capturar el token generado:
-   - Extensión de navegador de la comunidad rustplus.py (disponible en su documentación).
-   - Acceso al archivo `player.tokens.db` si eres administrador del servidor.
-4. Una vez tengas el token, usa `/rustplus pair` en Discord.
+### How to obtain your `player_token`
 
-### Flujo de trabajo típico
+1. Download the official **Rust+** app on your phone.
+2. In-game, open the menu and pair your base with the app.
+3. Use one of the following methods to capture the generated token:
+   - A community browser extension linked in the rustplus.py documentation.
+   - Access the `player.tokens.db` SQLite file if you are a server admin.
+4. Once you have the token, use `/rustplus pair` in Discord.
+
+### Typical workflow
 
 ```text
 1. /rustplus pair ip:123.45.67.89 port:28082 steam_id:76561198XXXX player_token:XXXXX
-2. /rustplus alarm_add pairing_id:1 entity_id:123456 label:"Puerta principal" channel:#alertas
-3. /rustplus switch_add pairing_id:1 entity_id:789012 label:"Torretas"
-4. /rustplus switch_on pairing_id:1 entity_id:789012   → ¡Torretas activadas desde Discord!
+2. /rustplus alarm_add pairing_id:1 entity_id:123456 label:"Front door" channel:#alerts
+3. /rustplus switch_add pairing_id:1 entity_id:789012 label:"Auto turrets"
+4. /rustplus switch_on pairing_id:1 entity_id:789012   → Turrets activated from Discord!
 ```
 
-### Funcionalidades en tiempo real
+### Real-time features
 
-- **Alertas de raid:** Cuando una Smart Alarm del juego se activa (explosión, intruso), el bot envía un embed de alerta inmediata al canal configurado.
-- **Relay de chat:** Los mensajes del chat de equipo del juego se reenvían automáticamente a un canal de Discord, y viceversa con `/rustplus send_message`.
-- **Control de dispositivos:** Activa o desactiva torretas, generadores o trampas directamente con botones en Discord.
+- **Raid alerts:** When a Smart Alarm triggers (explosion, intruder), the bot instantly sends an alert embed to the configured channel.
+- **Team chat relay:** In-game team chat messages are automatically forwarded to a Discord channel, and vice-versa via `/rustplus send_message`.
+- **Device control:** Toggle turrets, generators or traps directly from Discord buttons.
 
-## Estructura
+> **Note:** The Rust+ Companion port (default `28082`) is **different** from the game port (usually `28015`).
 
-- `main.py` arranque del bot y carga de extensiones.
-- `cogs/commands.py` comandos slash y utilidades de análisis.
-- `cogs/tracker.py` tareas en segundo plano para alertas de BattleMetrics.
-- `cogs/rustplus_cog.py` integración completa con Rust+ via WebSocket.
-- `database.py` capa SQLite y esquema (incluye tablas Rust+).
-- `battlemetrics.py` cliente para la API de BattleMetrics.
+---
 
-## Notas
+## Project Structure
 
-- La sincronización global de slash commands puede tardar un poco en reflejarse.
-- Si el bot no responde, revisa el token de Discord y el acceso de red a BattleMetrics.
-- El archivo de base de datos se puede borrar si quieres empezar desde cero.
-- La integración Rust+ es **opcional**: si no instalas `rustplus` o no configuras ningún pairing, el resto del bot funciona con normalidad.
-- El puerto Companion de Rust+ (por defecto `28082`) es **diferente** al puerto del juego (normalmente `28015`).
+```
+Rustalker/
+├── main.py               # Bot entry point and extension loader
+├── battlemetrics.py      # Async BattleMetrics API client
+├── database.py           # SQLite layer and schema (includes Rust+ tables)
+├── requirements.txt
+├── .env.example
+├── assets/
+│   └── rustalker.png     # Bot logo
+└── cogs/
+    ├── commands.py       # Slash commands and analysis utilities
+    ├── tracker.py        # Background tasks for BattleMetrics alerts
+    └── rustplus_cog.py   # Full Rust+ integration via WebSocket
+```
+
+## Notes
+
+- Global slash command sync may take a few minutes to propagate across Discord.
+- If the bot is unresponsive, check the Discord token and network access to BattleMetrics.
+- The database file can be deleted to start fresh.
+- The Rust+ integration is **optional**: if `rustplus` is not installed or no pairing is configured, the rest of the bot works normally.
